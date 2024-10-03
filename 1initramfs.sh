@@ -45,14 +45,20 @@ rootuuid=$(blkid -s UUID -o value $mnt)
 rootisluks=$(cryptsetup isLuks $rootmnt)
 
 # $1 = absolute path of binary
-copylibsfn() 
+copybinsfn() 
 {
+    for num in $1 ; do
+        dir=$(dirname "$num")
+        mkdir -p $tmp/$dir
+        cp $num $tmp/$dir
+    done
+
     libs=$(ldd $1 | awk '/ => / { print $3 }' | paste -sd ' ' -)
     if ldd $1 | grep -q /lib64/ld-linux-x86-64.so ; then 
         libs="$libs /lib64/ld-linux-x86-64.so.2"
     fi
     if ldd $1 | grep -q /lib/ld-linux.so.2 ; then 
-        libs="$libs /lib/ld-linux.so"
+        libs="$libs /lib/ld-linux.so.2"
     fi
 
     for num in $libs ; do
@@ -62,5 +68,11 @@ copylibsfn()
     done
 }
 
+. /etc/default/1initramfs
+
+echo -n "$"
+
+
 mkdir -p "$tmp"/{bin,dev,etc,lib,lib64,mnt/root,proc,root,sbin,sys,run}
-copylibsfn /usr/bin/lsusb
+
+
