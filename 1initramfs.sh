@@ -120,11 +120,15 @@ fi
 }
 
 buildbasefn() {
-mkdir -p "$tmp"/build/{bin,dev,etc,lib,lib64,mnt/root,proc,root,sbin,sys,run}
-copybinsfn $(which busybox) 2>/dev/null
+mkdir -p "$tmp"/build/{usr/bin,dev,etc,usr/lib,usr/lib64,mnt/root,proc,root,sys,run}
+cd $tmp/build/
+ln -sr ./usr/bin/ ./sbin
+ln -sr ./usr/bin/ ./bin
+ln -sr ./usr/bin/ ./usr/sbin
+ln -sr ./usr/lib/ ./lib
+ln -sr ./usr/lib64/ ./lib64
 
-cd $tmp/build/bin
-ln -sr ../usr/sbin/busybox busybox
+copybinsfn $(which busybox) 2>/dev/null
 
 if [ $rootisluks = 0 ] ; then
     copybinsfn $(which cryptsetup) 2>/dev/null
@@ -161,10 +165,18 @@ echo "$RECOVERYSH"
 if [ $RECOVERYSH = "y" ] ; then
     echo "rescue_shell() {
     echo 0 > /proc/sys/kernel/printk
+    busybox --install -s
     clear
     echo \"Dropping to a shell: \$1\"
     setsid cttyhack sh
 }" >> $tmp/build/init
+
+    echo "for item in \$(cat /proc/cmdline) ; do
+    case "\$item" in
+        rd.break|rdbreak)                                        rescue_shell ;;
+        init=/bin/sh|init=/bin/bb|init=/bin/bash|init=/bin/dash) rescue_shell ;;
+    esac
+done" >> $tmp/build/init
 fi
 
 #Mounting real root
