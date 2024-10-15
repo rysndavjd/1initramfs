@@ -12,6 +12,7 @@ fi
 tmp=$(mktemp -d)
 shversion="git"
 . /etc/default/1initramfs 2>/dev/null
+pwd=$(pwd)
 
 helpfn () {
     echo "1initramfs, version $shversion"
@@ -32,22 +33,52 @@ while getopts hc:o: flag ; do
     esac
 done
 
-rootmnt=$(findmnt -n -o SOURCE /)
+if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
+    mapper=$(basename "$(findmnt -n -o SOURCE /)")
+    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/device: //') 
+else
+    rootmnt=$(findmnt -n -o SOURCE /)
+fi
 rootuuid=$(blkid -s UUID -o value $rootmnt)
 rootluksuuid=$(cryptsetup luksUUID $rootmnt)
-cryptsetup isLuks $rootmnt
-rootisluks=$(echo $?)
+rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
+#if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then
+#    rootisluks="0"
+#else
+#    rootisluks="1"
+#fi
 
 if [ -z "${output+x}" ] ; then
-    output="/boot"
+    output="$pwd"
+    echo "Output not set, outputing to $pwd"
 fi
 
 if [ -z "${RECOVERYSH+x}" ] ; then
     RECOVERYSH="n"
 fi
 
+if [ -z "${COMPRESSION+x}" ] ; then
+    COMPRESSION=none
+    echo "Compression not set, defaulting to none."
+else
+    echo "Compression set to $COMPRESSION."
+fi
+
 if [ -z "${YUBIOVERIDE+x}" ] ; then
-    YUBIOVERIDE="n"
+    YUBIOVERIDE=n
+    echo "Yubikey Challenge not set."
+elif [ $YUBIOVERIDE = "y" ] ; then
+    if [ "$rootisluks" = "1" ] ; then
+        echo "Root is not LUKS, yubikey overide is useless."
+        exit 1
+    elif [ -z "${YUBICHAL+x}" ] ; then
+        echo "Yubikey challenge not set."
+        exit 1
+    elif [ $YUBICHAL = "manual" ] ; then
+        echo "Yubikey Challenge set to manual, challenge will be entered on boot."
+    else
+        echo "Yubikey Challenge set to $YUBICHAL."
+    fi
 fi
 
 if ! [ -e $config ] ; then
@@ -85,37 +116,32 @@ copybinsfn() {
     done
 }
 
-yubikeyfn () {
-if [ -z "${YUBIOVERIDE+x}" ] || [ $YUBIOVERIDE="n" ] ; then
-    YUBIOVERIDE=n
-    echo "Yubikey Challenge disabled."
-else
-    if [ $rootisluks=1 ] ; then
-        echo "Root is not LUKS, yubikey overide is useless."
-        exit 1
-    elif [ -z "${YUBICHAL+x}" ] ; then
-        echo "Yubikey challenge not set."
-        exit 1
-    elif [ $YUBICHAL="manual" ] ; then
-        echo "Yubikey Challenge set to manual, challenge will be entered on boot."
-    else
-        echo "Yubikey Challenge set to $YUBICHAL."
-    fi
-fi
-
-}
-
 compressionfn () {
-if [ -z "${COMPRESSION+x}" ] ; then
-    COMPRESSION=none
-    echo "Compression not set, defaulting to none."
-else
-    echo "Compression set to $COMPRESSION."
-fi
-
 cd "$tmp/build"
 if [ $COMPRESSION = "none" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > $output/initramfs.img 2>/dev/null
+    find . -print0 | cpio --null --create --verbose --format=newc > "$output"/initramfs.img 2>/dev/null
+elif [ $COMPRESSION = "gzip" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    gzip "$tmp"/initramfs.img 
+    mv "$tmp"/initramfs.img.gz "$output"/initramfs.img
+elif [ $COMPRESSION = "bzip2" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+
+elif [ $COMPRESSION = "lzma" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+
+elif [ $COMPRESSION = "xz" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+
+elif [ $COMPRESSION = "lzo" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+
+elif [ $COMPRESSION = "lz4" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+
+elif [ $COMPRESSION = "zstd" ] ; then 
+    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+
 fi
 }
 
@@ -138,7 +164,6 @@ if [ $YUBIOVERIDE = "y" ] ; then
     copybinsfn $(which ykchalresp) 2>/dev/null
     copybinsfn $(which lsusb) 2>/dev/null
 fi
-
 }
 
 buildinitfn() {
@@ -173,20 +198,20 @@ if [ $RECOVERYSH = "y" ] ; then
 
     echo "for item in \$(cat /proc/cmdline) ; do
     case "\$item" in
-        rd.break|rdbreak)                                        rescue_shell ;;
-        init=/bin/sh|init=/bin/bb|init=/bin/bash|init=/bin/dash) rescue_shell ;;
+        rd.break|rdbreak)   rescue_shell \"Rescue rdbreak\" ;;
+        init=/bin/sh|init=/bin/bb|init=/bin/bash|init=/bin/dash)    rescue_shell \"Rescue init=/bin/sh\" ;;
     esac
 done" >> $tmp/build/init
 fi
 
 #Mounting real root
-if [ $rootisluks = 0 ] && [ $YUBIOVERIDE = "y" ] && [ $YUBICHAL = "manual" ] ; then
+if [ $rootisluks = "0" ] && [ $YUBIOVERIDE = "y" ] && [ $YUBICHAL = "manual" ] ; then
 #    echo "echo 0 > /proc/sys/kernel/printk
 #echo \"Overide, tap Yubikey to start decryption.\"
 #echo -n \"\$(ykchalresp -2H )\"" >> $tmp/build/init
     echo "YUBICHAL=manual, still needs implementation"
     exit 1
-elif [ $rootisluks = 0 ] && [ $YUBIOVERIDE = "y" ] ; then
+elif [ $rootisluks = "0" ] && [ $YUBIOVERIDE = "y" ] ; then
     echo "echo 0 > /proc/sys/kernel/printk
 lsusb | grep -q \"$YUBIUSB\"
 if [ \$? = 0 ] ; then
@@ -196,7 +221,7 @@ else
     cryptsetup luksOpen --tries 3 \$(findfs UUID=$rootluksuuid) root
 fi
 mount -o ro /dev/mapper/root /mnt/root" >> $tmp/build/init
-elif [ $rootisluks = 0 ] ; then
+elif [ $rootisluks = "0" ] ; then
     echo "echo 0 > /proc/sys/kernel/printk
 cryptsetup luksOpen --tries 3 \$(findfs UUID=$rootluksuuid) root
 mount -o ro /dev/mapper/root /mnt/root" >> $tmp/build/init
@@ -212,6 +237,11 @@ umount /dev" >> $tmp/build/init
 
 #Switch to real root
 echo "exec switch_root /mnt/root /sbin/init" >> $tmp/build/init
+
+#Rescue shell
+if [ $RECOVERYSH = "y" ] ; then
+    echo "rescue_shell \"Switch_Root_Failed\"" >> $tmp/build/init
+fi
 }
 
 echo "$tmp"
