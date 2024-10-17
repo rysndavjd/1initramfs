@@ -114,28 +114,28 @@ copybinsfn() {
 compressionfn () {
 cd "$tmp/build"
 if [ $COMPRESSION = "none" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$output"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$output"/initramfs.img 
 elif [ $COMPRESSION = "gzip" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
     gzip "$tmp"/initramfs.img 
     mv "$tmp"/initramfs.img.gz "$output"/initramfs.img
 elif [ $COMPRESSION = "bzip2" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
 elif [ $COMPRESSION = "lzma" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
 elif [ $COMPRESSION = "xz" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
 elif [ $COMPRESSION = "lzo" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
 elif [ $COMPRESSION = "lz4" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
 elif [ $COMPRESSION = "zstd" ] ; then 
-    find . -print0 | cpio --null --create --verbose --format=newc > "$tmp"/initramfs.img 2>/dev/null
+    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
 fi
 }
