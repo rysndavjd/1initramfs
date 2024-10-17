@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# Copyright 2024 rysndavjd
-# 1initramfs
+# Copyright (c) 2024 rysndavjd
 # Distributed under the terms of the GNU General Public License v2
+# 1initramfs
 
 if [[ $EUID -ne 0 ]] ; then 
     echo "Run as root."
     exit 1
 fi
 
+pwd=$(pwd)
 tmp=$(mktemp -d)
 shversion="git"
 . /etc/default/1initramfs 2>/dev/null
-pwd=$(pwd)
 
 helpfn () {
     echo "1initramfs, version $shversion"
@@ -42,11 +42,6 @@ fi
 rootuuid=$(blkid -s UUID -o value $rootmnt)
 rootluksuuid=$(cryptsetup luksUUID $rootmnt)
 rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
-#if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then
-#    rootisluks="0"
-#else
-#    rootisluks="1"
-#fi
 
 if [ -z "${output+x}" ] ; then
     output="$pwd"
@@ -67,14 +62,14 @@ fi
 if [ -z "${YUBIOVERIDE+x}" ] ; then
     YUBIOVERIDE=n
     echo "Yubikey Challenge not set."
-elif [ $YUBIOVERIDE = "y" ] ; then
+elif [ "$YUBIOVERIDE" = "y" ] ; then
     if [ "$rootisluks" = "1" ] ; then
         echo "Root is not LUKS, yubikey overide is useless."
         exit 1
     elif [ -z "${YUBICHAL+x}" ] ; then
         echo "Yubikey challenge not set."
         exit 1
-    elif [ $YUBICHAL = "manual" ] ; then
+    elif [ "$YUBICHAL" = "manual" ] ; then
         echo "Yubikey Challenge set to manual, challenge will be entered on boot."
     else
         echo "Yubikey Challenge set to $YUBICHAL."
@@ -154,6 +149,13 @@ ln -sr ./usr/bin/ ./usr/sbin
 ln -sr ./usr/lib/ ./lib
 ln -sr ./usr/lib64/ ./lib64
 
+mknod ./dev/kmsg c 1 11
+mknod ./dev/console c 5 1
+mknod ./dev/null c 1 3
+mknod ./dev/zero c 1 5
+mknod ./dev/random c 1 8
+chmod 600 ./dev/*
+
 copybinsfn $(which busybox) 2>/dev/null
 
 if [ $rootisluks = 0 ] ; then
@@ -186,7 +188,6 @@ echo /sbin/mdev > /proc/sys/kernel/hotplug" >> $tmp/build/init
 fi
 
 #Rescue shell function
-echo "$RECOVERYSH"
 if [ $RECOVERYSH = "y" ] ; then
     echo "rescue_shell() {
     echo 0 > /proc/sys/kernel/printk
