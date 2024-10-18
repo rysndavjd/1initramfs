@@ -1,2 +1,3 @@
 initramfs*.img
+1initramfs-*.tar.gz
 .vscode

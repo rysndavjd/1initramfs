@@ -118,21 +118,27 @@ copybinsfn() {
 
 compressionfn () {
 cd "$tmp/build"
-if [ $COMPRESSION = "none" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$output"/initramfs.img 
-elif [ $COMPRESSION = "gzip" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc | gzip --quiet --stdout > "$output"/initramfs.img 
-elif [ $COMPRESSION = "bzip2" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc | bzip2 --quiet --compress --stdout > "$output"/initramfs.img 
-elif [ $COMPRESSION = "lzma" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc | xz --quiet --compress --format=lzma --stdout > "$output"/initramfs.img
-elif [ $COMPRESSION = "lz4" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc | lz4 -z -q -l -c > "$output"/initramfs.img
-elif [ $COMPRESSION = "zstd" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc | zstd --quiet --format=zstd --stdout > "$output"/initramfs.img
-elif [ "$COMPRESSION" = "embedded" ] ; then
-    find . -print0 | cpio --quiet --null --create --format=newc > "/usr/src/initramfs.cpio"
-fi
+
+case $COMPRESSION in
+    none)
+        find . -print0 | cpio --quiet --null --create --format=newc > "$output"/initramfs.img ;;
+    gzip)
+        find . -print0 | cpio --quiet --null --create --format=newc | gzip --quiet --stdout > "$output"/initramfs.img ;;
+    bzip2)
+        find . -print0 | cpio --quiet --null --create --format=newc | bzip2 --quiet --compress --stdout > "$output"/initramfs.img ;;
+    lzma)
+        find . -print0 | cpio --quiet --null --create --format=newc | xz --quiet --compress --format=lzma --stdout > "$output"/initramfs.img ;;
+    lz4)
+        find . -print0 | cpio --quiet --null --create --format=newc | lz4 -z -q -l -c > "$output"/initramfs.img ;;
+    zstd)
+        find . -print0 | cpio --quiet --null --create --format=newc | zstd --quiet --format=zstd --stdout > "$output"/initramfs.img ;;
+    embedded)
+        find . -print0 | cpio --quiet --null --create --format=newc > "/usr/src/initramfs.cpio" ;;
+    *)
+        echo "Unknown: $COMPRESSION"
+        exit 1 
+    ;;
+esac
 }
 
 if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
@@ -258,3 +264,4 @@ compressionfn
 if [ "$debug" = "0" ] ; then
     debugfn "Ending values"
 fi
+
