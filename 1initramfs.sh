@@ -26,6 +26,7 @@ helpfn () {
     exit 0
 }
 
+#$1 = output some text
 debugfn() {
     echo ""
     echo "$1"
@@ -43,18 +44,17 @@ debugfn() {
     echo ""
 }
 
-while getopts hdc:o:e flag ; do
+while getopts d:o:eh flag ; do
     case "${flag}" in
-        c) config="${OPTARG}";;
-        d) debug=0;;
+        d) debug="0";;
         o) output="${OPTARG}";;
-        e) embedded=0;;
+        e) embedded="0";;
         ?) helpfn;;
         h) helpfn;;
     esac
 done
 
-if [ $debug = 0 ] ; then
+if [ "$debug" = "0" ] ; then
     debugfn "Starting values"
 fi
 
@@ -63,10 +63,10 @@ if [ -z "${output+x}" ] ; then
     echo "Output not set, outputing to $pwd"
 fi
 
-if [ "$embedded" = 0 ] ; then
+if [ "$embedded" = "0" ] ; then
     COMPRESSION="embedded"
 elif [ -z "${COMPRESSION+x}" ] ; then
-    COMPRESSION=none
+    COMPRESSION="none"
     echo "Compression not set, defaulting to none."
 else
     echo "Compression set to $COMPRESSION."
@@ -84,11 +84,6 @@ if [ "$YUBIOVERIDE" = "y" ] ; then
     else
         echo "Yubikey Challenge set to $YUBICHAL."
     fi
-fi
-
-if ! [ -e $config ] ; then
-    echo "Specified config does not exist at $config."
-    exit 1
 fi
 
 if cat /proc/mounts | grep -q devtmpfs || zcat /proc/config.gz | grep -q CONFIG_DEVTMPFS ; then
@@ -126,21 +121,15 @@ cd "$tmp/build"
 if [ $COMPRESSION = "none" ] ; then 
     find . -print0 | cpio --quiet --null --create --format=newc > "$output"/initramfs.img 
 elif [ $COMPRESSION = "gzip" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-    gzip "$tmp"/initramfs.img 
-    mv "$tmp"/initramfs.img.gz "$output"/initramfs.img
+    find . -print0 | cpio --quiet --null --create --format=newc | gzip --quiet --stdout > "$output"/initramfs.img 
 elif [ $COMPRESSION = "bzip2" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-    bzip2 --quiet --compress "$tmp"/initramfs.img --stdout > "$output"/initramfs.img
-elif [ $COMPRESSION = "xz" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-    xz --stdout --compress "$tmp"/initramfs.img --stdout > "$output"/initramfs.img
+    find . -print0 | cpio --quiet --null --create --format=newc | bzip2 --quiet --compress --stdout > "$output"/initramfs.img 
+elif [ $COMPRESSION = "lzma" ] ; then 
+    find . -print0 | cpio --quiet --null --create --format=newc | xz --quiet --compress --format=lzma --stdout > "$output"/initramfs.img
 elif [ $COMPRESSION = "lz4" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-    lz4 -q -l "$tmp"/initramfs.img "$output"/initramfs.img
+    find . -print0 | cpio --quiet --null --create --format=newc | lz4 -z -q -l -c > "$output"/initramfs.img
 elif [ $COMPRESSION = "zstd" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-    zstd --quiet --format=zstd "$tmp"/initramfs.img -o "$output"/initramfs.img
+    find . -print0 | cpio --quiet --null --create --format=newc | zstd --quiet --format=zstd --stdout > "$output"/initramfs.img
 elif [ "$COMPRESSION" = "embedded" ] ; then
     find . -print0 | cpio --quiet --null --create --format=newc > "/usr/src/initramfs.cpio"
 fi
@@ -266,6 +255,6 @@ buildbasefn
 buildinitfn
 compressionfn
 
-if [ $debug = "y" ] ; then
+if [ "$debug" = "0" ] ; then
     debugfn "Ending values"
 fi
