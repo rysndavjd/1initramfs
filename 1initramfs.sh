@@ -21,15 +21,17 @@ helpfn () {
     echo "      -h  (calls help menu)"
     echo "      -c  (Override using default config at /etc/default/1initramfs)"
     echo "      -o  (Override default output directory at /boot)"
+    echo "      -e  (Will output initramfs at /usr/src/initramfs.cpio, to be embedded into a kernel)"    
     exit 0
 }
 
-while getopts hc:o: flag ; do
+while getopts hc:o:e flag ; do
     case "${flag}" in
         ?) helpfn;;
         h) helpfn;;
         c) config="${OPTARG}";;
         o) output="${OPTARG}";;
+        e) embedded=True;;
     esac
 done
 
@@ -52,7 +54,9 @@ if [ -z "${RECOVERYSH+x}" ] ; then
     RECOVERYSH="n"
 fi
 
-if [ -z "${COMPRESSION+x}" ] ; then
+if $embedded ; then
+    COMPRESSION="embedded"
+elif [ -z "${COMPRESSION+x}" ] ; then
     COMPRESSION=none
     echo "Compression not set, defaulting to none."
 else
@@ -121,22 +125,18 @@ elif [ $COMPRESSION = "gzip" ] ; then
     mv "$tmp"/initramfs.img.gz "$output"/initramfs.img
 elif [ $COMPRESSION = "bzip2" ] ; then 
     find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-
-elif [ $COMPRESSION = "lzma" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-
+    bzip2 --quiet --compress "$tmp"/initramfs.img --stdout > "$output"/initramfs.img
 elif [ $COMPRESSION = "xz" ] ; then 
     find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-
-elif [ $COMPRESSION = "lzo" ] ; then 
-    find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-
+    xz --stdout --compress "$tmp"/initramfs.img --stdout > "$output"/initramfs.img
 elif [ $COMPRESSION = "lz4" ] ; then 
     find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-
+    lz4 -q -l "$tmp"/initramfs.img "$output"/initramfs.img
 elif [ $COMPRESSION = "zstd" ] ; then 
     find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
 
+elif [ "$COMPRESSION" = "embedded" ] ; then
+    find . -print0 | cpio --quiet --null --create --format=newc > "/usr/src/initramfs.cpio"
 fi
 }
 
