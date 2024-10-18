@@ -19,42 +19,51 @@ helpfn () {
     echo "Usage: 1initramfs [option] ..."
     echo "Options:"
     echo "      -h  (calls help menu)"
+    echo "      -d  (Output debug info)"
     echo "      -c  (Override using default config at /etc/default/1initramfs)"
     echo "      -o  (Override default output directory at /boot)"
     echo "      -e  (Will output initramfs at /usr/src/initramfs.cpio, to be embedded into a kernel)"    
     exit 0
 }
 
-while getopts hc:o:e flag ; do
+debugfn() {
+    echo ""
+    echo "$1"
+    echo "PWD: $pwd"
+    echo "TMP: $tmp"
+    echo "VERSION: $shversion"
+    echo "CONFIG: $config"
+    echo "OUTPUT: $output"
+    echo "EMBEDDED: $embedded"
+    echo "RECOVERYSH: $RECOVERYSH"
+    echo "COMPRESSION: $COMPRESSION"
+    echo "YUBIOVERIDE: $YUBIOVERIDE"
+    echo "YUBICHAL: $YUBICHAL"
+    echo "YUBIUSB: $YUBIUSB"
+    echo ""
+}
+
+while getopts hdc:o:e flag ; do
     case "${flag}" in
+        c) config="${OPTARG}";;
+        d) debug=0;;
+        o) output="${OPTARG}";;
+        e) embedded=0;;
         ?) helpfn;;
         h) helpfn;;
-        c) config="${OPTARG}";;
-        o) output="${OPTARG}";;
-        e) embedded=True;;
     esac
 done
 
-if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
-    mapper=$(basename "$(findmnt -n -o SOURCE /)")
-    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/device: //') 
-else
-    rootmnt=$(findmnt -n -o SOURCE /)
+if [ $debug = 0 ] ; then
+    debugfn "Starting values"
 fi
-rootuuid=$(blkid -s UUID -o value $rootmnt)
-rootluksuuid=$(cryptsetup luksUUID $rootmnt)
-rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
 
 if [ -z "${output+x}" ] ; then
     output="$pwd"
     echo "Output not set, outputing to $pwd"
 fi
 
-if [ -z "${RECOVERYSH+x}" ] ; then
-    RECOVERYSH="n"
-fi
-
-if $embedded ; then
+if [ "$embedded" = 0 ] ; then
     COMPRESSION="embedded"
 elif [ -z "${COMPRESSION+x}" ] ; then
     COMPRESSION=none
@@ -63,10 +72,7 @@ else
     echo "Compression set to $COMPRESSION."
 fi
 
-if [ -z "${YUBIOVERIDE+x}" ] ; then
-    YUBIOVERIDE=n
-    echo "Yubikey Challenge not set."
-elif [ "$YUBIOVERIDE" = "y" ] ; then
+if [ "$YUBIOVERIDE" = "y" ] ; then
     if [ "$rootisluks" = "1" ] ; then
         echo "Root is not LUKS, yubikey overide is useless."
         exit 1
@@ -85,7 +91,7 @@ if ! [ -e $config ] ; then
     exit 1
 fi
 
-if cat /proc/mounts | grep -q devtmpfs || zcat /proc/config.gz | grep -q CONFIG_DEVTMPFS || cat /boot/config* | grep -q CONFIG_DEVTMPFS ; then
+if cat /proc/mounts | grep -q devtmpfs || zcat /proc/config.gz | grep -q CONFIG_DEVTMPFS ; then
     dev="devtmpfs"
 else
     dev="mdev"
@@ -134,11 +140,21 @@ elif [ $COMPRESSION = "lz4" ] ; then
     lz4 -q -l "$tmp"/initramfs.img "$output"/initramfs.img
 elif [ $COMPRESSION = "zstd" ] ; then 
     find . -print0 | cpio --quiet --null --create --format=newc > "$tmp"/initramfs.img 
-
+    zstd --quiet --format=zstd "$tmp"/initramfs.img -o "$output"/initramfs.img
 elif [ "$COMPRESSION" = "embedded" ] ; then
     find . -print0 | cpio --quiet --null --create --format=newc > "/usr/src/initramfs.cpio"
 fi
 }
+
+if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
+    mapper=$(basename "$(findmnt -n -o SOURCE /)")
+    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/device: //') 
+else
+    rootmnt=$(findmnt -n -o SOURCE /)
+fi
+rootuuid=$(blkid -s UUID -o value $rootmnt)
+rootluksuuid=$(cryptsetup luksUUID $rootmnt)
+rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
 
 buildbasefn() {
 mkdir -p "$tmp"/build/{usr/bin,dev,etc,usr/lib,usr/lib64,mnt/root,proc,root,sys,run}
@@ -250,6 +266,6 @@ buildbasefn
 buildinitfn
 compressionfn
 
-#echo -n "$YUBICHAL" | xxd -p -c 1 | awk '{$1=$1; gsub(/ /, ""); printf "%s", $0}' | ykman otp calculate 2
-
-
+if [ $debug = "y" ] ; then
+    debugfn "Ending values"
+fi
