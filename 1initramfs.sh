@@ -136,7 +136,7 @@ rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
 rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher: //')
 rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://')
 
-# $1 = absolute path of binary
+# $1 = absolute path of userspace binaries
 copybinsfn() {
     for num in $1 ; do
         dir=$(dirname "$num")
@@ -160,22 +160,8 @@ copybinsfn() {
     done
 }
 
-#Copy optimisation modules for crypto modules for specific x86 extensions (AVX2, AVX512, etc)
-#crytoaccelkmodfn() {
-#
-#}
-
-#Copy hash algoriums modules needed to decrypt rootfs
-#hashkmodfn() {
-#for item in $rootlukshash ; do 
-#    case $item in 
-#
-#    esac
-#done
-#}
-#
-
-algokmodfn() {
+#function to minimise repeation of code for copying kernel modules
+kmodfn() {
 if modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
     echo "$1 builtin."
 else
@@ -189,89 +175,104 @@ else
 fi
 }
 
-#Copy crypto algoriums needed to decrypt rootfs
+#resolves optimisation modules for crypto modules for specific x86 extensions (AVX2, AVX512, ssse3, etc)
+#crytoaccelkmodfn() {
+#
+#}
+
+#resolves hash algoriums modules needed to decrypt rootfs
+#hashkmodfn() {
+#for item in $rootlukshash ; do 
+#    case $item in 
+#
+#    esac
+#done
+#}
+#
+
+#resolves needed crypto algoriums to decrypt rootfs
 copyalgokmodfn() {
 for item in $rootluksalgo ; do
     case $item in 
         *-xts-*)
-        
+            kmodfn xts
             case $item in
-                serpent-*)
+                aes-*)
 
+                ;;
+                serpent-*)
+                    
+                ;;
+                twofish-*)
+
+                ;;
+                camellia-*)
+
+                ;;
+                *)
+                    echo "Unknown Algorium used in xts mode of operation: $item" 
                 ;;
             esac
         ;;
         *-cbc-*)
+            kmodfn cbc
             case $item in
                 serpent-*)
                     
                 ;;
+                *)
+                    echo "Unknown Algorium used in cbc mode of operation: $item" 
+                ;;
             esac
+        ;;
+        *)
+            echo "Unknown mode of operation for encryption"
+            exit 1
         ;;
     esac
 done
 }
 
-#function to minimise repeation of code
-fskmodfn() {
-if modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
-    echo "$rootfs builtin."
-else
-    mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
-    cp "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
-    deps=$(modinfo "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
-    for item in $deps ; do
-        mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
-        cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
-    done
-fi
-}
-
-#copy fs module to read root fs
+#resolves fs module to read root fs
 copyfskmodfn() {
 mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
 cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
 case $rootfs in
     ext4) 
-        fskmodfn ext4
+        kmodfn ext4
     ;;
     jfs) 
-        fskmodfn jfs
+        kmodfn jfs
     ;;
     xfs) 
-        fskmodfn xfs
+        kmodfn xfs
     ;;
     gfs2) 
-        fskmodfn gfs2    
+        kmodfn gfs2    
     ;;
     ocfs2) 
-        fskmodfn ocfs2
+        kmodfn ocfs2
     ;;
     btrfs) 
-        fskmodfn btrfs
+        kmodfn btrfs
     ;;
     nilfs2) 
-        fskmodfn nilfs2
+        kmodfn nilfs2
     ;;
     f2fs) 
-        fskmodfn f2fs
+        kmodfn f2fs
     ;;
     bcachefs) 
-        fskmodfn bcachefs
+        kmodfn bcachefs
     ;;
     ntfs) 
-        fskmodfn ntfs3 
+        kmodfn ntfs3 
     ;;
     *) echo "Unknown fs: $rootfs" 
     exit 1 
     ;;
 esac
 }
-
-#Function that runs all other copy functions for kernel modules and performs checks
-#copykmodfn() {
-#
-#}
 
 compressionfn () {
 if [ $KMODULES = "y" ] ; then
