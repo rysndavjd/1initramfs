@@ -43,6 +43,13 @@ debugfn() {
     echo "YUBIOVERIDE: $YUBIOVERIDE"
     echo "YUBICHAL: $YUBICHAL"
     echo "YUBIUSB: $YUBIUSB"
+    echo "rootmnt: $rootmnt"
+    echo "rootuuid: $rootuuid"
+    echo "rootfs: $rootfs"
+    echo "rootluksuuid: $rootluksuuid"
+    echo "rootisluks: $rootisluks"
+    echo "rootluksalgo: $rootluksalgo"
+    echo "rootlukshash: $rootlukshash"
     echo ""
 }
 
@@ -90,20 +97,8 @@ fi
 if [ -z "${kernelver+x}" ] && [ "$KMODULES" = "y" ] ; then
     echo "Copying currently running kernels modules: $(uname -r)"
     kernelver="$(uname -r)"
-    #if [ -f /proc/config.gz ] ; then
-    #    kernelconf=$(zcat /proc/config.gz)
-    #elif [ -f "/lib/modules/$kernelver/build/.config" ] ; then
-    #    kernelconf=$(cat "/lib/modules/$kernelver/build/.config")
-    #elif [ -f "/boot/config-$kernelver" ] ; then
-    #    kernelconf=$(cat "/boot/config-$kernelver")
-    #fi
 elif [ "$KMODULES" = "y" ] ; then 
     echo "Copying specified kernel version modules: $kernelver"
-    #if [ -f "/lib/modules/$kernelver/build/.config" ] ; then
-    #    kernelconf=$(cat "/lib/modules/$kernelver/build/.config")
-    #elif [ -f "/boot/config-$kernelver" ] ; then
-    #    kernelconf=$(cat "/boot/config-$kernelver")
-    #fi
 fi
 
 if [ "$YUBIOVERIDE" = "y" ] ; then
@@ -130,7 +125,7 @@ fi
 
 if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
     mapper=$(basename "$(findmnt -n -o SOURCE /)")
-    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/\tdevice: //') 
+    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/device://') 
 else
     rootmnt=$(findmnt -n -o SOURCE /)
 fi
@@ -166,149 +161,117 @@ copybinsfn() {
 }
 
 #Copy optimisation modules for crypto modules for specific x86 extensions (AVX2, AVX512, etc)
-copyaccelkmodfn() {
-
-}
+#crytoaccelkmodfn() {
+#
+#}
 
 #Copy hash algoriums modules needed to decrypt rootfs
-copyhashkmodfn() {
-for item in $rootlukshash ; do 
-    case $item in 
+#hashkmodfn() {
+#for item in $rootlukshash ; do 
+#    case $item in 
+#
+#    esac
+#done
+#}
+#
 
-    esac
-done
+algokmodfn() {
+if modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
+    echo "$1 builtin."
+else
+    mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
+    cp "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
+    deps=$(modinfo "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+    for item in $deps ; do
+        mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
+        cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
+    done
+fi
 }
 
 #Copy crypto algoriums needed to decrypt rootfs
 copyalgokmodfn() {
 for item in $rootluksalgo ; do
     case $item in 
+        *-xts-*)
+        
+            case $item in
+                serpent-*)
 
+                ;;
+            esac
+        ;;
+        *-cbc-*)
+            case $item in
+                serpent-*)
+                    
+                ;;
+            esac
+        ;;
     esac
 done
 }
 
+#function to minimise repeation of code
+fskmodfn() {
+if modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
+    echo "$rootfs builtin."
+else
+    mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
+    cp "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
+    deps=$(modinfo "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+    for item in $deps ; do
+        mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
+        cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
+    done
+fi
+}
+
 #copy fs module to read root fs
 copyfskmodfn() {
+mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
+cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
 case $rootfs in
     ext4) 
-        if modinfo -k $kernelver ext4 | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n ext4)) 
-            cp "$(modinfo -k $kernelver -n ext4)" "$tmp/build/$(modinfo -k $kernelver -n ext4)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n jbd2)) 
-            cp "$(modinfo -k $kernelver -n jbd2)" "$tmp/build/$(modinfo -k $kernelver -n jbd2)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n mbcache)) 
-            cp "$(modinfo -k $kernelver -n mbcache)" "$tmp/build/$(modinfo -k $kernelver -n mbcache)"
-        fi
+        fskmodfn ext4
     ;;
     jfs) 
-        if modinfo -k $kernelver jfs | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n jfs)) 
-            cp "$(modinfo -k $kernelver -n jfs)" "$tmp/build/$(modinfo -k $kernelver -n jfs)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n nls_ucs2_utils)) 
-            cp "$(modinfo -k $kernelver -n nls_ucs2_utils)" "$tmp/build/$(modinfo -k $kernelver -n nls_ucs2_utils)"
-        fi
+        fskmodfn jfs
     ;;
     xfs) 
-        if modinfo -k $kernelver xfs | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n xfs)) 
-            cp "$(modinfo -k $kernelver -n xfs)" "$tmp/build/$(modinfo -k $kernelver -n xfs)"
-        fi
+        fskmodfn xfs
     ;;
     gfs2) 
-        if modinfo -k $kernelver gfs2 | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n gfs2)) 
-            cp "$(modinfo -k $kernelver -n gfs2)" "$tmp/build/$(modinfo -k $kernelver -n gfs2)"
-        fi
+        fskmodfn gfs2    
     ;;
     ocfs2) 
-        if modinfo -k $kernelver ocfs2 | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n ocfs2)) 
-            cp "$(modinfo -k $kernelver -n ocfs2)" "$tmp/build/$(modinfo -k $kernelver -n ocfs2)"
-        fi
+        fskmodfn ocfs2
     ;;
     btrfs) 
-        if modinfo -k $kernelver btrfs | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n btrfs)) 
-            cp "$(modinfo -k $kernelver -n btrfs)" "$tmp/build/$(modinfo -k $kernelver -n btrfs)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n raid6_pq)) 
-            cp "$(modinfo -k $kernelver -n raid6_pq)" "$tmp/build/$(modinfo -k $kernelver -n raid6_pq)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n zstd_compress)) 
-            cp "$(modinfo -k $kernelver -n zstd_compress)" "$tmp/build/$(modinfo -k $kernelver -n zstd_compress)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n lzo_compress)) 
-            cp "$(modinfo -k $kernelver -n lzo_compress)" "$tmp/build/$(modinfo -k $kernelver -n lzo_compress)"
-        fi
+        fskmodfn btrfs
     ;;
     nilfs2) 
-        if modinfo -k $kernelver nilfs2 | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n nilfs2)) 
-            cp "$(modinfo -k $kernelver -n nilfs2)" "$tmp/build/$(modinfo -k $kernelver -n nilfs2)"
-        fi
+        fskmodfn nilfs2
     ;;
     f2fs) 
-        if modinfo -k $kernelver f2fs | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n f2fs)) 
-            cp "$(modinfo -k $kernelver -n f2fs)" "$tmp/build/$(modinfo -k $kernelver -n f2fs)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n zstd_compress)) 
-            cp "$(modinfo -k $kernelver -n zstd_compress)" "$tmp/build/$(modinfo -k $kernelver -n zstd_compress)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n lz4hc_compress)) 
-            cp "$(modinfo -k $kernelver -n lz4hc_compress)" "$tmp/build/$(modinfo -k $kernelver -n lz4hc_compress)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n lzo_compress)) 
-            cp "$(modinfo -k $kernelver -n lzo_compress)" "$tmp/build/$(modinfo -k $kernelver -n lzo_compress)"
-        fi
+        fskmodfn f2fs
     ;;
     bcachefs) 
-        if modinfo -k $kernelver bcachefs | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n bcachefs)) 
-            cp "$(modinfo -k $kernelver -n bcachefs)" "$tmp/build/$(modinfo -k $kernelver -n bcachefs)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n raid6_pq)) 
-            cp "$(modinfo -k $kernelver -n raid6_pq)" "$tmp/build/$(modinfo -k $kernelver -n raid6_pq)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n zstd_compress)) 
-            cp "$(modinfo -k $kernelver -n zstd_compress)" "$tmp/build/$(modinfo -k $kernelver -n zstd_compress)"
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n lz4hc_compress)) 
-            cp "$(modinfo -k $kernelver -n lz4hc_compress)" "$tmp/build/$(modinfo -k $kernelver -n lz4hc_compress)"
-        fi
+        fskmodfn bcachefs
     ;;
     ntfs) 
-        if modinfo -k $kernelver ntfs3 | grep -q "(builtin)" ; then
-            echo "$rootfs builtin."
-        else
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n ntfs3)) 
-            cp "$(modinfo -k $kernelver -n ntfs3)" "$tmp/build/$(modinfo -k $kernelver -n ntfs3)"
-        fi
+        fskmodfn ntfs3 
     ;;
     *) echo "Unknown fs: $rootfs" 
     exit 1 
     ;;
 esac
-
-mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
-cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
-
 }
 
 #Function that runs all other copy functions for kernel modules and performs checks
-copykmodfn() {
-
-}
+#copykmodfn() {
+#
+#}
 
 compressionfn () {
 if [ $KMODULES = "y" ] ; then
@@ -355,10 +318,6 @@ mknod ./dev/null c 1 3
 mknod ./dev/zero c 1 5
 mknod ./dev/random c 1 8
 chmod 600 ./dev/*
-
-if [ "$KMODULES" = "y" ] ; then
-    copykmodfn
-fi
 
 copybinsfn $(which busybox) 2>/dev/null
 
@@ -461,6 +420,10 @@ fi
 
 buildbasefn
 buildinitfn
+copyfskmodfn
+#copyalgokmodfn
+#copyhashkmodfn
+#copyaccelkmodfn
 compressionfn
 
 if [ "$debug" ] ; then
