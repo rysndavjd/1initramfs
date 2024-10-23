@@ -45,8 +45,10 @@ debugfn() {
     echo "YUBIUSB: $YUBIUSB"
     echo "rootmnt: $rootmnt"
     echo "rootuuid: $rootuuid"
+    echo "rootinterface: $rootinterface"
     echo "rootfs: $rootfs"
     echo "rootluksuuid: $rootluksuuid"
+    echo "rootluksversion: $rootluksversion"
     echo "rootisluks: $rootisluks"
     echo "rootluksalgo: $rootluksalgo"
     echo "rootlukshash: $rootlukshash"
@@ -125,24 +127,25 @@ fi
 
 if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
     mapper=$(basename "$(findmnt -n -o SOURCE /)")
-    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/device://') 
+    rootmnt=$(cryptsetup status "$mapper" | grep device: | sed 's/device://' | tr -d '\t ') 
 else
-    rootmnt=$(findmnt -n -o SOURCE /)
+    rootmnt=$(findmnt -n -o SOURCE / | tr -d '\t ')
 fi
 rootuuid=$(blkid -s UUID -o value $rootmnt)
 rootfs=$(blkid -s TYPE -o value $(findmnt -n -o SOURCE /))
+rootinterface=$(lsblk -o TRAN -n $rootmnt | tr -d '\n')
 rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
 if [ $rootisluks = 0 ] ; then
     rootluksuuid=$(cryptsetup luksUUID $rootmnt)
-    rootluksversion=$(cryptsetup luksDump $rootmnt | grep Version: | sed 's/Version: //')
-    if [ "$rootluksversion" = "1" ] ; then
-        ciphername=$(cryptsetup luksDump $rootmnt | grep "Cipher name:" | sed 's/Cipher name:[[:space:]]//' | xargs)
-        ciphermode=$(cryptsetup luksDump $rootmnt | grep "Cipher mode:" | sed 's/Cipher mode:[[:space:]]//' | xargs)
+    rootluksversion=$(cryptsetup luksDump $rootmnt | grep Version: | sed 's/Version://' | tr -d '\t ')
+    if echo $rootluksversion | grep -q 1 ; then
+        ciphername=$(cryptsetup luksDump $rootmnt | grep "Cipher name:" | sed 's/Cipher name://' | tr -d '\t ')
+        ciphermode=$(cryptsetup luksDump $rootmnt | grep "Cipher mode:" | sed 's/Cipher mode://' | tr -d '\t ')
         rootluksalgo="$ciphername-$ciphermode"
         rootlukshash=$(cryptsetup luksDump $rootmnt | grep "Hash spec:" | sed 's/Hash spec:[[:space:]]//')
     elif [ "$rootluksversion" = "2" ] ; then
-        rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher: //')
-        rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://')
+        rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher://' | tr -d '\t ')
+        rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://' | tr -d '\n')
     fi
 fi
 
@@ -175,34 +178,89 @@ kmodfn() {
     if modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
         echo "$1 builtin."
     else
+        echo "$1 copied."
         mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
         cp "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
-        deps=$(modinfo "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+        #Dependies of module being checked
+        deps=$(modinfo -k $kernelver "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+        #Dependies of module dependies being checked
+        for item in $deps ; do
+            subdeps=$(modinfo -k $kernelver "$item" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+            for item in $subdeps ; do
+                mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
+                cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
+            done
+        done
         for item in $deps ; do
             mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
             cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
         done
+        echo "modprobe $1" >> "$tmp/modprobe"
     fi
 }
 
+blockkmodfn() {
+    case $rootinterface in
+        sata)
+            kmodfn libata
+            kmodfn sd_mod
+            kmodfn scsi_mod
+        ;;
+        nvme)
+            kmodfn nvme
+        ;;
+        *)
+            echo "Unknown block interface: $rootinterface"
+            exit 1
+        ;;
+    esac
+}
+
 #resolves optimisation modules for crypto modules for specific x86 extensions (AVX2, AVX512, ssse3, etc)
-#crytoaccelkmodfn() {
+#copycrytoaccelkmodfn() {
 #
 #}
 
 #resolves hash algoriums modules needed to decrypt rootfs
-#hashkmodfn() {
-#for item in $rootlukshash ; do 
-#    case $item in 
-#
-#    esac
-#done
-#}
-#
+copyhashkmodfn() {
+    for item in $rootlukshash ; do 
+        case $item in 
+            sha1)
+                kmodfn sha1_generic
+            ;;
+            sha3)
+                kmodfn sha3_generic
+            ;;
+            sha224)
+                kmodfn sha256_generic
+            ;;
+            sha256)
+                kmodfn sha256_generic
+            ;;
+            sha384)
+                kmodfn sha512_generic
+            ;;
+            sha512)
+                kmodfn sha512_generic
+            ;;
+            ripemd160)
+                kmodfn rmd160
+            ;;
+            whirlpool) 
+                kmodfn wp512
+            ;;
+            *)
+                echo "Unknown hash algorium: $item"
+            ;;
+        esac
+    done
+}
 
 #resolves needed crypto algoriums to decrypt rootfs
 copyalgokmodfn() {
     for item in $rootluksalgo ; do
+            kmodfn dm-mod
+            kmodfn dm-crypt
         if echo "$item" | grep -q "xts" ; then
             kmodfn xts
         elif echo "$item" | grep -q "cbc" ; then
@@ -323,7 +381,16 @@ buildbasefn() {
     
     copybinsfn $(which busybox) 2>/dev/null
 
-    if [ $rootisluks = 0 ] ; then
+    if [ $rootisluks = 0 ] && [ $KMODULES = "y" ] ; then
+        ldconfig -C "$tmp/build/etc/ld.so.cache"
+        libgcc=$(ldconfig -p | grep libgcc_s.so.1 | awk '/ => / { print $4 }')
+        for item in $libgcc ; do
+            dir=$(dirname "$item")
+            mkdir -p $tmp/build/$dir
+            cp $item $tmp/build/$dir    
+        done
+        copybinsfn $(which cryptsetup) 2>/dev/null
+    elif [ $rootisluks = 0 ] ; then
         copybinsfn $(which cryptsetup) 2>/dev/null
     fi
 
@@ -370,14 +437,10 @@ echo /sbin/mdev > /proc/sys/kernel/hotplug" >> $tmp/build/init
 done" >> $tmp/build/init
     fi
 
-    availfsmod="ext4 jfs xfs gfs2 ocfs2 btrfs nilfs2 f2fs bcachefs ntfs"
+
     # Inserting kernel modules
     if [ "$KMODULES" = "y" ] ; then
-        for item in $availfsmod ; do 
-            if echo "$item" | grep -q "$rootfs" ; then
-                echo "modprobe $item" >> $tmp/build/init
-            fi
-        done
+        cat "$tmp/modprobe" >> $tmp/build/init
     fi
 
     #Mounting real root
@@ -421,13 +484,16 @@ umount /dev" >> $tmp/build/init
 }
 
 buildbasefn
-buildinitfn
 if [ $KMODULES = "y" ] ; then
+    blockkmodfn
     copyfskmodfn
-    copyalgokmodfn
-    #copyhashkmodfn
-    #copyaccelkmodfn
+    if [ $rootisluks = "0" ] ; then
+        copyalgokmodfn
+        copyhashkmodfn
+        #copyaccelkmodfn
+    fi
 fi
+buildinitfn
 compressionfn
 
 if [ "$debug" ] ; then
