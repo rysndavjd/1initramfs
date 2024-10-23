@@ -20,7 +20,6 @@ helpfn () {
     echo "Options:"
     echo "      -h  (calls help menu)"
     echo "      -d  (Output debug info)"
-    echo "      -c  (Override using default config at /etc/default/1initramfs)"
     echo "      -o  (Override default output directory at /boot)"
     echo "      -e  (Will output initramfs at /usr/src/initramfs.cpio, to be embedded into a kernel)"    
     echo "      -k  (Specify kernel to include essential kernel modules for)"    
@@ -36,7 +35,6 @@ debugfn() {
     echo "VERSION: $shversion"
     echo "CONFIG: $config"
     echo "OUTPUT: $output"
-    echo "EMBEDDED: $embedded"
     echo "RECOVERYSH: $RECOVERYSH"
     echo "COMPRESSION: $COMPRESSION"
     echo "KMODULES: $KMODULES"
@@ -59,7 +57,7 @@ while getopts do:ek:h flag ; do
     case "${flag}" in
         d) debug="0";;
         o) output="${OPTARG}";;
-        e) embedded="0";;
+        e) COMPRESSION="embedded";;
         k) kernelver="${OPTARG}";;
         ?) helpfn;;
         h) helpfn;;
@@ -74,10 +72,6 @@ fi
 if [ -z "${output+x}" ] ; then
     output="$pwd"
     echo "Output not set, outputing to $pwd"
-fi
-
-if [ $embedded ] ; then
-    COMPRESSION="embedded"
 fi
 
 if ! [ -d /lib/modules/$kernelver ] ; then
@@ -175,15 +169,22 @@ copybinsfn() {
 
 #function to minimise repeation of code for copying kernel modules
 kmodfn() {
-    if modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
+    touch "$tmp/modprobe"
+    if modinfo -k $kernelver "$1" | grep -q "ERROR" ; then
+        echo "Module not found: $1"
+    elif modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
         echo "$1 builtin."
     else
         echo "$1 copied."
         mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
         cp "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
-        #Dependies of module being checked
+        #Dependies of modules ($1) being checked
         deps=$(modinfo -k $kernelver "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
-        #Dependies of module dependies being checked
+        for item in $deps ; do
+            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
+            cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
+        done
+        #Dependies of dependies modules being checked
         for item in $deps ; do
             subdeps=$(modinfo -k $kernelver "$item" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
             for item in $subdeps ; do
@@ -191,14 +192,11 @@ kmodfn() {
                 cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
             done
         done
-        for item in $deps ; do
-            mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
-            cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
-        done
         echo "modprobe $1" >> "$tmp/modprobe"
     fi
 }
 
+#Resolves kernel modules for block devices
 blockkmodfn() {
     case $rootinterface in
         sata)
@@ -294,8 +292,6 @@ copyalgokmodfn() {
 
 #resolves fs module to read root fs
 copyfskmodfn() {
-    mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
-    cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
     case $rootfs in
         ext4) 
             kmodfn ext4
@@ -437,7 +433,6 @@ echo /sbin/mdev > /proc/sys/kernel/hotplug" >> $tmp/build/init
 done" >> $tmp/build/init
     fi
 
-
     # Inserting kernel modules
     if [ "$KMODULES" = "y" ] ; then
         cat "$tmp/modprobe" >> $tmp/build/init
@@ -468,7 +463,6 @@ mount -o ro /dev/mapper/root /mnt/root" >> $tmp/build/init
         echo "mount -o ro \$(findfs UUID=$rootuuid) /mnt/root" >> $tmp/build/init
     fi
 
-
     #Cleanup
     echo "umount /proc
 umount /sys
@@ -485,12 +479,13 @@ umount /dev" >> $tmp/build/init
 
 buildbasefn
 if [ $KMODULES = "y" ] ; then
+    mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
+    cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
     blockkmodfn
     copyfskmodfn
     if [ $rootisluks = "0" ] ; then
         copyalgokmodfn
         copyhashkmodfn
-        #copyaccelkmodfn
     fi
 fi
 buildinitfn
