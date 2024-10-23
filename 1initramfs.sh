@@ -131,17 +131,19 @@ else
 fi
 rootuuid=$(blkid -s UUID -o value $rootmnt)
 rootfs=$(blkid -s TYPE -o value $(findmnt -n -o SOURCE /))
-rootluksuuid=$(cryptsetup luksUUID $rootmnt)
 rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
-rootluksversion=$(cryptsetup luksDump $rootmnt | grep Version: | sed 's/Version: //')
-if [ $rootluksversion = "1" ] ; then
-    ciphername=$(cryptsetup luksDump $rootmnt | grep "Cipher name:" | sed 's/Cipher name:[[:space:]]//' | xargs)
-    ciphermode=$(cryptsetup luksDump $rootmnt | grep "Cipher mode:" | sed 's/Cipher mode:[[:space:]]//' | xargs)
-    rootluksalgo="${ciphername}-${ciphermode}"
-    rootlukshash=$(cryptsetup luksDump $rootmnt | grep "Hash spec:" | sed 's/Hash spec:[[:space:]]//')
-elif [ $rootluksversion = "2" ] ; then
-    rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher: //')
-    rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://')
+if [ $rootisluks = 0 ] ; then
+    rootluksuuid=$(cryptsetup luksUUID $rootmnt)
+    rootluksversion=$(cryptsetup luksDump $rootmnt | grep Version: | sed 's/Version: //')
+    if [ "$rootluksversion" = "1" ] ; then
+        ciphername=$(cryptsetup luksDump $rootmnt | grep "Cipher name:" | sed 's/Cipher name:[[:space:]]//' | xargs)
+        ciphermode=$(cryptsetup luksDump $rootmnt | grep "Cipher mode:" | sed 's/Cipher mode:[[:space:]]//' | xargs)
+        rootluksalgo="$ciphername-$ciphermode"
+        rootlukshash=$(cryptsetup luksDump $rootmnt | grep "Hash spec:" | sed 's/Hash spec:[[:space:]]//')
+    elif [ "$rootluksversion" = "2" ] ; then
+        rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher: //')
+        rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://')
+    fi
 fi
 
 # $1 = absolute path of userspace binaries
@@ -201,62 +203,32 @@ kmodfn() {
 #resolves needed crypto algoriums to decrypt rootfs
 copyalgokmodfn() {
     for item in $rootluksalgo ; do
-        case $item in 
-            *-xts-*)
-                kmodfn xts
-                case $item in
-                    aes-xts*)
-                        kmodfn aes_generic
-                    ;;
-                    aria-xts*)
-                        kmodfn aria_generic
-                    ;;
-                    blowfish-xts*)
-                        kmodfn blowfish_generic
-                    ;;
-                    camellia-xts*)
-                        kmodfn camellia_generic
-                    ;;
-                    serpent-xts*)
-                        kmodfn serpent_generic
-                    ;;
-                    twofish-xts*)
-                        kmodfn twofish_generic
-                    ;;
-                    *)
-                        echo "Unknown Algorium used in xts mode of operation: $item" 
-                    ;;
-                esac
+        if echo "$item" | grep -q "xts" ; then
+            kmodfn xts
+        elif echo "$item" | grep -q "cbc" ; then
+            kmodfn cbc
+        fi
+        case $item in
+            aes*)
+                kmodfn aes_generic
             ;;
-            *-cbc-*)
-                kmodfn cbc
-                case $item in
-                    aes-cbc*)
-                        kmodfn aes_generic
-                    ;;
-                    aria-cbc*)
-                        kmodfn aria_generic
-                    ;;
-                    blowfish-cbc*)
-                        kmodfn blowfish_generic
-                    ;;
-                    camellia-cbc*)
-                        kmodfn camellia_generic
-                    ;;
-                    serpent-cbc*)
-                        kmodfn serpent_generic
-                    ;;
-                    twofish-cbc*)
-                        kmodfn twofish_generic
-                    ;;
-                    *)
-                        echo "Unknown Algorium used in cbc mode of operation: $item" 
-                    ;;
-                esac
+            aria*)
+                kmodfn aria_generic
+            ;;
+            blowfish*)
+                kmodfn blowfish_generic
+            ;;
+            camellia*)
+                kmodfn camellia_generic
+            ;;
+            serpent*)
+                kmodfn serpent_generic
+            ;;
+            twofish*)
+                kmodfn twofish_generic
             ;;
             *)
-                echo "Unknown mode of operation for encryption"
-                exit 1
+                echo "Unknown Algorium used in xts mode of operation: $item" 
             ;;
         esac
     done
@@ -450,10 +422,12 @@ umount /dev" >> $tmp/build/init
 
 buildbasefn
 buildinitfn
-copyfskmodfn
-copyalgokmodfn
-#copyhashkmodfn
-#copyaccelkmodfn
+if [ $KMODULES = "y" ] ; then
+    copyfskmodfn
+    copyalgokmodfn
+    #copyhashkmodfn
+    #copyaccelkmodfn
+fi
 compressionfn
 
 if [ "$debug" ] ; then
