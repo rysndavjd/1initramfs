@@ -133,8 +133,16 @@ rootuuid=$(blkid -s UUID -o value $rootmnt)
 rootfs=$(blkid -s TYPE -o value $(findmnt -n -o SOURCE /))
 rootluksuuid=$(cryptsetup luksUUID $rootmnt)
 rootisluks=$(cryptsetup isLuks $rootmnt ; echo -En $?)
-rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher: //')
-rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://')
+rootluksversion=$(cryptsetup luksDump $rootmnt | grep Version: | sed 's/Version: //')
+if [ $rootluksversion = "1" ] ; then
+    ciphername=$(cryptsetup luksDump $rootmnt | grep "Cipher name:" | sed 's/Cipher name:[[:space:]]//' | xargs)
+    ciphermode=$(cryptsetup luksDump $rootmnt | grep "Cipher mode:" | sed 's/Cipher mode:[[:space:]]//' | xargs)
+    rootluksalgo="${ciphername}-${ciphermode}"
+    rootlukshash=$(cryptsetup luksDump $rootmnt | grep "Hash spec:" | sed 's/Hash spec:[[:space:]]//')
+elif [ $rootluksversion = "2" ] ; then
+    rootluksalgo=$(cryptsetup luksDump $rootmnt | grep "cipher:" | sed 's/\tcipher: //')
+    rootlukshash=$(cryptsetup luksDump $rootmnt | grep "AF hash:" | sed 's/\tAF hash://')
+fi
 
 # $1 = absolute path of userspace binaries
 copybinsfn() {
@@ -197,17 +205,23 @@ copyalgokmodfn() {
             *-xts-*)
                 kmodfn xts
                 case $item in
-                    aes-*)
-
+                    aes-xts*)
+                        kmodfn aes_generic
                     ;;
-                    serpent-*)
-
+                    aria-xts*)
+                        kmodfn aria_generic
                     ;;
-                    twofish-*)
-
+                    blowfish-xts*)
+                        kmodfn blowfish_generic
                     ;;
-                    camellia-*)
-
+                    camellia-xts*)
+                        kmodfn camellia_generic
+                    ;;
+                    serpent-xts*)
+                        kmodfn serpent_generic
+                    ;;
+                    twofish-xts*)
+                        kmodfn twofish_generic
                     ;;
                     *)
                         echo "Unknown Algorium used in xts mode of operation: $item" 
@@ -217,8 +231,23 @@ copyalgokmodfn() {
             *-cbc-*)
                 kmodfn cbc
                 case $item in
-                    serpent-*)
-
+                    aes-cbc*)
+                        kmodfn aes_generic
+                    ;;
+                    aria-cbc*)
+                        kmodfn aria_generic
+                    ;;
+                    blowfish-cbc*)
+                        kmodfn blowfish_generic
+                    ;;
+                    camellia-cbc*)
+                        kmodfn camellia_generic
+                    ;;
+                    serpent-cbc*)
+                        kmodfn serpent_generic
+                    ;;
+                    twofish-cbc*)
+                        kmodfn twofish_generic
                     ;;
                     *)
                         echo "Unknown Algorium used in cbc mode of operation: $item" 
@@ -422,7 +451,7 @@ umount /dev" >> $tmp/build/init
 buildbasefn
 buildinitfn
 copyfskmodfn
-#copyalgokmodfn
+copyalgokmodfn
 #copyhashkmodfn
 #copyaccelkmodfn
 compressionfn
