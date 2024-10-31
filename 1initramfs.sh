@@ -148,7 +148,7 @@ copybinsfn() {
     for num in $1 ; do
         dir=$(dirname "$num")
         mkdir -p $tmp/build/$dir
-        cp $num $tmp/build/$dir
+        cp -f $num $tmp/build/$dir
     done
 
     libs=$(ldd $1 | awk '/ => / { print $3 }' | paste -sd ' ' -)
@@ -163,7 +163,7 @@ copybinsfn() {
     for num in $libs ; do
         dir=$(dirname "$num")
         mkdir -p $tmp/build/$dir
-        cp $num $tmp/build/$dir
+        cp -f $num $tmp/build/$dir
     done
 }
 
@@ -171,28 +171,29 @@ copybinsfn() {
 kmodfn() {
     touch "$tmp/modprobe"
     if modinfo -k $kernelver "$1" | grep -q "ERROR" ; then
-        echo "Module not found: $1"
+        echo "Module not found, system might not boot: $1"
     elif modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
         echo "$1 builtin."
+        echo "output=\$(modprobe $1 2>&1 >/dev/null) || echo \"Error with module: $1.\" ; echo "\$output" | tee /dev/kmsg" >> "$tmp/modprobe"
     else
         echo "$1 copied."
         mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
-        cp "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
+        cp -f "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
         #Dependies of modules ($1) being checked
         deps=$(modinfo -k $kernelver "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
         for item in $deps ; do
             mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
-            cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
+            cp -f "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
         done
         #Dependies of dependies modules being checked
         for item in $deps ; do
             subdeps=$(modinfo -k $kernelver "$item" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
             for item in $subdeps ; do
                 mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
-                cp "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
+                cp -f "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
             done
         done
-        echo "modprobe $1" >> "$tmp/modprobe"
+        echo "output=\$(modprobe $1 2>&1 >/dev/null) || echo \"Error with module: $1.\" ; echo "\$output" | tee /dev/kmsg" >> "$tmp/modprobe"
     fi
 }
 
@@ -214,10 +215,96 @@ blockkmodfn() {
     esac
 }
 
+#aes_generic aria_generic blowfish_generic camellia_generic serpent_generic twofish_generic
 #resolves optimisation modules for crypto modules for specific x86 extensions (AVX2, AVX512, ssse3, etc)
-#copycrytoaccelkmodfn() {
-#
-#}
+crytoaccelkmodfn() {
+    modules=$(cat $tmp/modprobe | sed 's/modprobe//')
+    cpu=$(cat /proc/cpuinfo | sed -n '/flags/{p;q}' | sed 's/flags//' | tr -d ':')
+
+    #AES
+    if echo "$cpu" | grep -q "\baes\b" ; then
+        if echo "$modules" | grep -q "aes_generic" ; then
+            kmodfn aesni_intel
+        elif echo "$modules" | grep -q "aria_generic" ; then
+            kmodfn aria-aesni-avx-x86_64
+            kmodfn aria-aesni-avx2-x86_64
+        elif echo "$modules" | grep -q "camellia_generic" ; then
+            kmodfn camellia-aesni-avx-x86_64
+            kmodfn camellia-aesni-avx2
+        fi
+    fi
+    #AVX
+    if echo "$cpu" | grep -q "\bavx\b" ; then
+        if echo "$modules" | grep -q "aria_generic" ; then
+            kmodfn aria-aesni-avx-x86_64 
+        elif echo "$modules" | grep -q "camellia_generic" ; then
+            kmodfn camellia-aesni-avx-x86_64
+        elif echo "$modules" | grep -q "serpent_generic" ; then
+            kmodfn serpent-avx-x86_64
+        elif echo "$modules" | grep -q "twofish_generic" ; then
+            kmodfn twofish-avx-x86_64
+        fi
+    fi
+    #AVX2
+    if echo "$cpu" | grep -q "\bavx2\b" ; then
+        if echo "$modules" | grep -q "aria_generic" ; then
+            kmodfn aria-aesni-avx2-x86_64 
+        elif echo "$modules" | grep -q "camellia_generic" ; then
+            kmodfn camellia-aesni-avx2
+        elif echo "$modules" | grep -q "serpent_generic" ; then
+            kmodfn serpent-avx2
+        fi
+    fi
+    #AVX512
+    if echo "$cpu" | grep -q "\bavx512" ; then
+        if echo "$modules" | grep -q "aria_generic" ; then
+            kmodfn aria-gfni-avx512-x86_64                
+        fi
+    fi
+    #SSE2
+    if echo "$cpu" | grep -q "\bsse2\b" ; then         
+        if echo "$modules" | grep -q "serpent_generic" ; then
+            kmodfn serpent_sse2_x86_64                
+        fi
+    fi
+    #GFNI
+    if echo "$cpu" | grep -q "\bgfni\b" ; then         
+        if echo "$modules" | grep -q "aria_generic" ; then
+            kmodfn aria-gfni-avx512-x86_64                 
+        fi
+    fi
+    #Generic asm acceleration modules
+    if echo "$modules" | grep -q "blowfish_generic" ; then
+        kmodfn blowfish-x86_64
+    elif echo "$modules" | grep -q "camellia_generic" ; then
+        kmodfn camellia-x86_64
+    elif echo "$modules" | grep -q "twofish_generic" ; then
+        kmodfn twofish-x86_64
+        kmodfn twofish-x86_64-3way
+    fi
+}
+
+hashaccelkmodfn() {
+    modules=$(cat $tmp/modprobe | sed 's/modprobe//')
+    cpu=$(cat /proc/cpuinfo | sed -n '/flags/{p;q}' | sed 's/flags//' | tr -d ':')
+
+    if echo "$cpu" | grep -q "\bavx\b" || echo "$cpu" | grep -q "\bavx2\b" || echo "$cpu" | grep -q "\bssse3\b"; then
+        if echo "$modules" | grep -q "sha1_generic" ; then
+            kmodfn sha1-ssse3            
+        elif echo "$modules" | grep -q "sha256_generic" ; then
+            kmodfn sha256_ssse3
+        elif echo "$modules" | grep -q "sha512_generic" ; then
+            kmodfn sha512_ssse3
+        fi
+    fi
+    if echo "$cpu" | grep -q "\bsha_ni\b" ; then
+        if echo "$modules" | grep -q "sha1_generic" ; then
+            kmodfn sha1-ssse3            
+        elif echo "$modules" | grep -q "sha256_generic" ; then
+            kmodfn sha256_ssse3
+        fi
+    fi
+}
 
 #resolves hash algoriums modules needed to decrypt rootfs
 copyhashkmodfn() {
@@ -469,11 +556,10 @@ umount /sys
 umount /dev" >> $tmp/build/init
 
     #Switch to real root
-    echo "exec switch_root /mnt/root /sbin/init" >> $tmp/build/init
-
-    #Rescue shell
     if [ $RECOVERYSH = "y" ] ; then
-        echo "rescue_shell \"Switch_Root_Failed\"" >> $tmp/build/init
+        echo "exec switch_root /mnt/root /sbin/init || rescue_shell \"Switch_Root_Failed\""1 >> $tmp/build/init
+    else
+        echo "exec switch_root /mnt/root /sbin/init" >> $tmp/build/init    
     fi
 }
 
@@ -486,6 +572,8 @@ if [ $KMODULES = "y" ] ; then
     if [ $rootisluks = "0" ] ; then
         copyalgokmodfn
         copyhashkmodfn
+        crytoaccelkmodfn
+        hashaccelkmodfn
     fi
 fi
 buildinitfn
