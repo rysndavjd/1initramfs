@@ -26,10 +26,8 @@ helpfn () {
     exit 0
 }
 
-#$1 = output some text
 debugfn() {
     echo ""
-    echo "$1"
     echo "PWD: $pwd"
     echo "TMP: $tmp"
     echo "VERSION: $shversion"
@@ -64,37 +62,28 @@ while getopts do:ek:h flag ; do
     esac
 done
 
-#flag options
-if [ $debug ] ; then
-    debugfn "Starting values"
-fi
-
 if [ -z "${output+x}" ] ; then
     output="$pwd"
     echo "Output not set, outputing to $pwd"
 fi
 
-if ! [ -d /lib/modules/$kernelver ] ; then
-    echo "Unable to find kernel directory at /lib/modules/$kernelver"
+if [ -z "${kernelver+x}" ] ; then
+    kernelver="$(uname -r)"
 fi
 
 if [ $KMODULES = "y" ] ; then
-    echo "Kernel modules will be included into initramfs"
+    if ! [ -d /lib/modules/$kernelver ] ; then
+        echo "Unable to find kernel directory at /lib/modules/$kernelver"
+        exit 1
+    fi
+    echo "Copying kernel modules from: $kernelver"
 fi
 
-#1initramfs.conf checks
 if [ -z "${COMPRESSION+x}" ] ; then
     COMPRESSION="none"
     echo "Compression not set, defaulting to none."
 else
     echo "Compression set to $COMPRESSION."
-fi
-
-if [ -z "${kernelver+x}" ] && [ "$KMODULES" = "y" ] ; then
-    echo "Copying currently running kernels modules: $(uname -r)"
-    kernelver="$(uname -r)"
-elif [ "$KMODULES" = "y" ] ; then 
-    echo "Copying specified kernel version modules: $kernelver"
 fi
 
 if [ "$YUBIOVERIDE" = "y" ] ; then
@@ -116,8 +105,6 @@ if cat /proc/mounts | grep -q devtmpfs || zcat /proc/config.gz | grep -q CONFIG_
 else
     dev="mdev"
 fi
-
-#Functions
 
 if findmnt -n -o SOURCE / | grep -q /dev/mapper/ ; then 
     mapper=$(basename "$(findmnt -n -o SOURCE /)")
@@ -145,6 +132,11 @@ fi
 
 # $1 = absolute path of userspace binaries
 copybinsfn() {
+    if [ ! -f $1 ] ; then
+        echo "Binary not found: $1"
+        exit 1
+    fi
+    
     for num in $1 ; do
         dir=$(dirname "$num")
         mkdir -p $tmp/build/$dir
@@ -464,7 +456,7 @@ buildbasefn() {
     
     copybinsfn $(which busybox) 2>/dev/null
 
-    if [ $rootisluks = 0 ] && [ $KMODULES = "y" ] ; then
+    if [ $rootisluks = 0 ] ; then
         ldconfig -C "$tmp/build/etc/ld.so.cache"
         libgcc=$(ldconfig -p | grep libgcc_s.so.1 | awk '/ => / { print $4 }')
         for item in $libgcc ; do
@@ -473,13 +465,24 @@ buildbasefn() {
             cp $item $tmp/build/$dir    
         done
         copybinsfn $(which cryptsetup) 2>/dev/null
-    elif [ $rootisluks = 0 ] ; then
-        copybinsfn $(which cryptsetup) 2>/dev/null
     fi
 
     if [ $YUBIOVERIDE = "y" ] ; then
         copybinsfn $(which ykchalresp) 2>/dev/null
         copybinsfn $(which lsusb) 2>/dev/null
+    fi
+
+    if [ $KMODULES = "y" ] ; then
+        mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
+        cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
+        blockkmodfn
+        copyfskmodfn
+        if [ $rootisluks = "0" ] ; then
+            copyalgokmodfn
+            copyhashkmodfn
+            crytoaccelkmodfn
+            hashaccelkmodfn
+        fi
     fi
 }
 
@@ -502,10 +505,15 @@ mount -n -t sysfs sys /sys" >> $tmp/build/init
 echo /sbin/mdev > /proc/sys/kernel/hotplug" >> $tmp/build/init
     fi
 
-    #Rescue shell function
+    # Inserting kernel modules
+    if [ "$KMODULES" = "y" ] ; then
+        cat "$tmp/modprobe" >> $tmp/build/init
+    fi
+
+    #Rescue shell
     if [ $RECOVERYSH = "y" ] ; then
         echo "rescue_shell() {
-    echo 0 > /proc/sys/kernel/printk
+    [ ! -f /proc/sys/kernel/printk ] || echo 0 > /proc/sys/kernel/printk
     busybox --install -s
     clear
     echo \"Dropping to a shell: \$1\"
@@ -520,20 +528,12 @@ echo /sbin/mdev > /proc/sys/kernel/hotplug" >> $tmp/build/init
 done" >> $tmp/build/init
     fi
 
-    # Inserting kernel modules
-    if [ "$KMODULES" = "y" ] ; then
-        cat "$tmp/modprobe" >> $tmp/build/init
-    fi
-
     #Mounting real root
     if [ $rootisluks = "0" ] && [ $YUBIOVERIDE = "y" ] && [ $YUBICHAL = "manual" ] ; then
-    #    echo "echo 0 > /proc/sys/kernel/printk
-    #echo \"Overide, tap Yubikey to start decryption.\"
-    #echo -n \"\$(ykchalresp -2H )\"" >> $tmp/build/init
         echo "YUBICHAL=manual, still needs implementation"
         exit 1
     elif [ $rootisluks = "0" ] && [ $YUBIOVERIDE = "y" ] ; then
-        echo "echo 0 > /proc/sys/kernel/printk
+        echo "[ ! -f /proc/sys/kernel/printk ] || echo 0 > /proc/sys/kernel/printk
 lsusb | grep -q \"$YUBIUSB\"
 if [ \$? = 0 ] ; then
     echo \"Overide, tap Yubikey to start decryption.\"
@@ -557,29 +557,17 @@ umount /dev" >> $tmp/build/init
 
     #Switch to real root
     if [ $RECOVERYSH = "y" ] ; then
-        echo "exec switch_root /mnt/root /sbin/init || rescue_shell \"Switch_Root_Failed\""1 >> $tmp/build/init
+        echo "exec switch_root /mnt/root /sbin/init || rescue_shell \"Switch_Root_Failed\"" >> $tmp/build/init
     else
         echo "exec switch_root /mnt/root /sbin/init" >> $tmp/build/init    
     fi
 }
 
 buildbasefn
-if [ $KMODULES = "y" ] ; then
-    mkdir -p "$tmp/build/lib/modules/$kernelver/kernel"
-    cp /lib/modules/$kernelver/modules.* "$tmp/build/lib/modules/$kernelver/"
-    blockkmodfn
-    copyfskmodfn
-    if [ $rootisluks = "0" ] ; then
-        copyalgokmodfn
-        copyhashkmodfn
-        crytoaccelkmodfn
-        hashaccelkmodfn
-    fi
-fi
 buildinitfn
 compressionfn
 
 if [ "$debug" ] ; then
-    debugfn "Ending values"
+    debugfn
 fi
 
