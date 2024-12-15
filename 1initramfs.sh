@@ -166,7 +166,7 @@ kmodfn() {
         echo "Module not found, system might not boot: $1"
     elif modinfo -k $kernelver "$1" | grep -q "(builtin)" ; then
         echo "$1 builtin."
-        echo "output=\$(modprobe $1 2>&1 >/dev/null) || echo \"Error with module: $1.\" ; echo "\$output" | tee /dev/kmsg" >> "$tmp/modprobe"
+        #echo "output=\$(modprobe $1 2>&1 >/dev/null) || echo \"Error with module: $1.\" ; echo "\$output" | tee /dev/kmsg" >> "$tmp/modprobe"
     else
         echo "$1 copied."
         mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
@@ -363,7 +363,7 @@ copyalgokmodfn() {
                 kmodfn twofish_generic
             ;;
             *)
-                echo "Unknown Algorium used in xts mode of operation: $item" 
+                echo "Unknown Algorium used: $item" 
             ;;
         esac
     done
@@ -406,6 +406,31 @@ copyfskmodfn() {
         exit 1 
         ;;
     esac
+}
+
+firmwarefn () {
+    filename="initramfs-$kernelver.img"
+    mkdir -p "$tmp/build/lib/firmware/"
+    if [ "$EXTRA_FIRMWARE" == "all" ] ; then
+        cp -rf /lib/firmware "$tmp/build/lib/"
+        echo "Copied all firmware."
+    else
+        dmesg_firmware=$(dmesg | grep 'firmware:' | awk '{print $5}')
+        firmwares="$dmesg_firmware $EXTRA_FIRMWARE"
+
+        for firmware in $firmwares ; do 
+            if [ -e "/lib/firmware/$firmware" ] ; then
+                mkdir -p "$tmp/build/$(dirname "/lib/firmware/$firmware")"
+                if [ -L "/lib/firmware/$firmware" ] ; then
+                    realfile=$(readlink -f "/lib/firmware/$firmware")
+                    mkdir -p "$tmp/build/$(dirname "$realfile")"
+                    cp -f "$realfile" "$tmp/build/$(dirname "$realfile")"
+                fi
+                cp -rf "/lib/firmware/$firmware" "$tmp/build/$(dirname "/lib/firmware/$firmware")"
+                echo "Copied $(basename $firmware)."
+            fi
+        done
+    fi
 }
 
 compressionfn () {
@@ -470,6 +495,10 @@ buildbasefn() {
     if [ $YUBIOVERIDE = "y" ] ; then
         copybinsfn $(which ykchalresp) 2>/dev/null
         copybinsfn $(which lsusb) 2>/dev/null
+    fi
+
+    if [ $FIRMWARE = "y" ] ; then
+        firmwarefn
     fi
 
     if [ $KMODULES = "y" ] ; then
