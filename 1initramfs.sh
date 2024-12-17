@@ -172,14 +172,14 @@ kmodfn() {
         mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n "$1")) 
         cp -f "$(modinfo -k $kernelver -n "$1")" "$tmp/build/$(modinfo -k $kernelver -n "$1")"
         #Dependies of modules ($1) being checked
-        deps=$(modinfo -k $kernelver "$1" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+        deps=$(modinfo -F depends -k $kernelver "$1")
         for item in $deps ; do
             mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
             cp -f "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
         done
         #Dependies of dependies modules being checked
         for item in $deps ; do
-            subdeps=$(modinfo -k $kernelver "$item" | grep "depends:" | sed 's/,/ /g' | sed 's/depends://')
+            subdeps=$(modinfo -F depends -k $kernelver "$item")
             for item in $subdeps ; do
                 mkdir -p $tmp/build/$(dirname $(modinfo -k $kernelver -n $item)) 
                 cp -f "$(modinfo -k $kernelver -n $item)" "$tmp/build/$(modinfo -k $kernelver -n $item)"
